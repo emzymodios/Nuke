@@ -1,12 +1,20 @@
+# bot.py - Modified to run as Web Service on Render
 import discord
 from discord.ext import commands
 import asyncio
 import os
 import random
 from typing import Dict
+from flask import Flask, request, jsonify
+import threading
+import time
+
+# Flask app for web service
+app = Flask(__name__)
 
 TOKEN = os.getenv('DISCORD_TOKEN', '')
 PREFIX = os.getenv('COMMAND_PREFIX', '!')
+PORT = int(os.getenv('PORT', 10000))
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=PREFIX, intents=intents)
@@ -231,10 +239,44 @@ async def on_ready():
     print(f'📡 Connected to {len(bot.guilds)} servers')
     print(f'⚡ Prefix: {PREFIX}')
     print('🔥 Nuke commands ready!')
+    print(f'🌐 Web server running on port {PORT}')
 
-async def main():
+# Flask routes to keep web service alive
+@app.route('/')
+def index():
+    return jsonify({
+        'status': 'online',
+        'bot': str(bot.user),
+        'servers': len(bot.guilds),
+        'prefix': PREFIX
+    })
+
+@app.route('/ping')
+def ping():
+    return jsonify({'pong': True, 'status': 'alive'})
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'healthy'})
+
+async def run_bot():
+    """Run the Discord bot"""
     await bot.add_cog(NukeCommands(bot))
     await bot.start(TOKEN)
 
+def run_flask():
+    """Run Flask web server in a separate thread"""
+    app.run(host='0.0.0.0', port=PORT, debug=False)
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Start Flask in background thread
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    # Run Discord bot
+    try:
+        asyncio.run(run_bot())
+    except KeyboardInterrupt:
+        print("Bot stopped")
+    except Exception as e:
+        print(f"Error: {e}")
