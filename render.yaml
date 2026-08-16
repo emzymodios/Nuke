@@ -1,0 +1,12 @@
+services:
+  - type: worker
+    name: discord-nuke-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: COMMAND_PREFIX
+        value: "!"
+    plan: free
