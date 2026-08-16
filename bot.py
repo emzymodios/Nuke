@@ -203,11 +203,11 @@ class NukeCommands(commands.Cog):
     async def spam_messages(self, guild, count: int = 5):
         sent = 0
         messages = [
-            '@everyone SERVER NUKE INITIATED',
-            '@everyone GAME OVER',
-            'https://discord.gg/nuke-server',
+            '@everyone SEVER DA BI NUKE',
+            '@everyone NUKE ME MAY NEK',
+            'https://discord.gg/xnyxd6QEa',
             'THIS SERVER IS DESTROYED',
-            'R.I.P. SERVER'
+            'MAY CHET CHUA CON NGU '
         ]
         for channel in guild.channels:
             if isinstance(channel, discord.TextChannel):
